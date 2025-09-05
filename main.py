@@ -8,6 +8,7 @@ from datetime import datetime, time
 from astrbot.api.event import filter, AstrMessageEvent, MessageChain
 from astrbot.api.star import Context, Star, StarTools, register
 from astrbot.api import logger
+import astrbot.api.message_components as Comp
 import aiohttp
 
 @dataclass
@@ -20,11 +21,14 @@ class SigninConfig:
     auto_signin_enabled: bool = False
     auto_signin_time: str = "08:00"
     notification_targets: Dict[str, str] = None  # 通知目标 -> 通知级别映射
+    notification_types: Dict[str, str] = None  # 通知目标 -> 消息类型映射 (group/private)
     offset: float = 0.000020  # 经纬度随机偏移值
     
     def __post_init__(self):
         if self.notification_targets is None:
             self.notification_targets = {}
+        if self.notification_types is None:
+            self.notification_types = {}
     
     def is_complete(self) -> tuple[bool, str]:
         """检查配置是否完整"""
@@ -91,6 +95,10 @@ class DusSigninPlugin(Star):
                         # 确保notification_targets字段存在
                         if 'notification_targets' not in config_data:
                             config_data['notification_targets'] = {}
+                        
+                        # 确保notification_types字段存在
+                        if 'notification_types' not in config_data:
+                            config_data['notification_types'] = {}
                             
                         self.user_configs[user_id] = SigninConfig(**config_data)
                         
@@ -301,7 +309,6 @@ class DusSigninPlugin(Star):
             
     async def _send_signin_notification(self, config: SigninConfig, result: dict, user_id: str):
         """发送签到通知"""
-        message = f"自动签到结果: {result['message']}"
         
         # 向所有配置的通知目标发送通知
         for target, level in config.notification_targets.items():
@@ -312,9 +319,27 @@ class DusSigninPlugin(Star):
                 continue
                 
             try:
-                message_chain = MessageChain().message(message)
-                await self.context.send_message(target, message_chain)
-                logger.info(f"已发送签到通知到: {target} (级别: {level})")
+                # 获取保存的会话类型，如果没有记录则通过target判断
+                session_type = config.notification_types.get(target, "")
+                if not session_type:
+                    # 兼容旧数据，通过target特征判断
+                    session_type = "group" if "group" in target.lower() or len(target.split("_")) > 1 else "private"
+                
+                # 构建消息组件列表，按照AstrBot文档标准
+                if session_type == "group":
+                    # 群聊中@用户
+                    chain = [
+                        Comp.At(qq=user_id),
+                        Comp.Plain(f"自动签到结果: {result['message']}")
+                    ]
+                else:
+                    # 私聊直接发送
+                    chain = [
+                        Comp.Plain(f"自动签到结果: {result['message']}")
+                    ]
+                
+                await self.context.send_message(target, chain)
+                logger.info(f"已发送签到通知到: {target} (级别: {level}, 类型: {session_type})")
             except Exception as e:
                 logger.error(f"发送签到通知失败 [{target}]: {e}")
             
@@ -334,22 +359,22 @@ class DusSigninPlugin(Star):
         if param == "cookie":
             config.cookie = value
             await self._save_user_configs()
-            yield event.plain_result("Cookie set successfully")
+            yield event.plain_result("Cookie设置成功")
             
         elif param == "lat":
             config.lat = value
             await self._save_user_configs()
-            yield event.plain_result(f"Latitude set to: {value}")
+            yield event.plain_result(f"纬度已设置为: {value}")
             
         elif param == "lng":
             config.lng = value
             await self._save_user_configs()
-            yield event.plain_result(f"Longitude set to: {value}")
+            yield event.plain_result(f"经度已设置为: {value}")
             
         elif param == "class_id":
             config.class_id = value
             await self._save_user_configs()
-            yield event.plain_result(f"Class ID set to: {value}")
+            yield event.plain_result(f"班级ID已设置为: {value}")
             
         elif param == "auto_time":
             if re.match(r'^\d{1,2}:\d{2}$', value):
@@ -360,16 +385,16 @@ class DusSigninPlugin(Star):
                 if config.auto_signin_enabled:
                     await self._schedule_auto_signin(user_id)
                     
-                yield event.plain_result(f"Auto signin time set to: {value}")
+                yield event.plain_result(f"自动签到时间已设置为: {value}")
             else:
-                yield event.plain_result("Time format error, please use HH:MM format, e.g.: 08:30")
+                yield event.plain_result("时间格式错误，请使用HH:MM格式，例如：08:30")
                 
         elif param == "auto_enable":
             if value.lower() in ["true", "1", "yes", "enable"]:
                 config.auto_signin_enabled = True
                 await self._save_user_configs()
                 await self._schedule_auto_signin(user_id)
-                yield event.plain_result("Auto signin enabled")
+                yield event.plain_result("自动签到已启用")
             elif value.lower() in ["false", "0", "no", "disable"]:
                 config.auto_signin_enabled = False
                 await self._save_user_configs()
@@ -379,60 +404,65 @@ class DusSigninPlugin(Star):
                     self.scheduled_tasks[user_id].cancel()
                     del self.scheduled_tasks[user_id]
                     
-                yield event.plain_result("Auto signin disabled")
+                yield event.plain_result("自动签到已禁用")
             else:
-                yield event.plain_result("Please use: enable/disable or true/false")
+                yield event.plain_result("请使用: enable/disable 或 true/false")
                 
         elif param == "notification":
             if value in ["always", "never", "failure_only"]:
                 # 在当前会话设置通知级别
                 config.notification_targets[event.unified_msg_origin] = value
                 
+                # 记录会话类型
+                session_type = "group" if event.get_group_id() else "private"
+                config.notification_types[event.unified_msg_origin] = session_type
+                
                 await self._save_user_configs()
                 
-                # 判断会话类型给出提示
-                session_type = "group" if event.get_group_id() else "private"
-                yield event.plain_result(f"Notification level set to '{value}' for current {session_type} chat")
+                yield event.plain_result(f"已为当前{session_type}聊天设置通知级别为: {value}")
             else:
-                yield event.plain_result("Notification level can only be: always/never/failure_only")
+                yield event.plain_result("通知级别只能是: always/never/failure_only")
                 
         elif param == "offset":
             try:
                 offset_value = float(value)
                 if offset_value < 0:
-                    yield event.plain_result("Offset value cannot be negative")
+                    yield event.plain_result("偏移值不能为负数")
                     return
                 config.offset = offset_value
                 await self._save_user_configs()
-                yield event.plain_result(f"GPS offset set to: {offset_value}")
+                yield event.plain_result(f"GPS偏移已设置为: {offset_value}")
             except ValueError:
-                yield event.plain_result("Invalid offset value, please enter a number")
+                yield event.plain_result("无效的偏移值，请输入数字")
                 
         elif param == "remove_notification":
             if event.unified_msg_origin in config.notification_targets:
                 del config.notification_targets[event.unified_msg_origin]
+                # 同时删除会话类型记录
+                if event.unified_msg_origin in config.notification_types:
+                    del config.notification_types[event.unified_msg_origin]
                 await self._save_user_configs()
                 session_type = "group" if event.get_group_id() else "private"
-                yield event.plain_result(f"Notification settings removed for current {session_type} chat")
+                yield event.plain_result(f"已移除当前{session_type}聊天的通知设置")
             else:
-                yield event.plain_result("No notification settings for current chat")
+                yield event.plain_result("当前聊天没有通知设置")
         else:
             yield event.plain_result(
-                "Available parameters:\n"
-                "cookie <value> - Set login cookie\n"
-                "lat <value> - Set latitude\n"
-                "lng <value> - Set longitude\n"
-                "class_id <value> - Set class ID\n"
-                "offset <value> - Set GPS coordinate offset (default: 0.000020)\n"
-                "auto_time <HH:MM> - Set auto signin time\n"
-                "auto_enable <enable/disable> - Enable/disable auto signin\n"
-                "notification <always/never/failure_only> - Set notification level for current chat\n"
-                "remove_notification - Remove notification settings for current chat"
+                "可用参数：\n"
+                "cookie <值> - 设置登录Cookie\n"
+                "lat <值> - 设置纬度\n"
+                "lng <值> - 设置经度\n"
+                "class_id <值> - 设置班级ID\n"
+                "offset <值> - 设置GPS坐标偏移（默认: 0.000020）\n"
+                "auto_time <HH:MM> - 设置自动签到时间\n"
+                "auto_enable <enable/disable> - 启用/禁用自动签到\n"
+                "notification <always/never/failure_only> - 设置当前聊天的通知级别\n"
+                "remove_notification - 移除当前聊天的通知设置"
             )
             
     @signin_commands.command("now")
     async def manual_signin(self, event: AstrMessageEvent):
-        """Execute signin immediately"""
+        """立即执行签到"""
         user_id = event.get_sender_id()
         config = self._get_user_config(user_id)
         
@@ -440,11 +470,11 @@ class DusSigninPlugin(Star):
         is_complete, error_msg = config.is_complete()
         if not is_complete:
             if error_msg == "Cookie未设置":
-                yield event.plain_result("Please set cookie first: /signin set cookie <your_cookie>")
+                yield event.plain_result("请先设置Cookie: /signin set cookie <你的Cookie>")
             elif error_msg == "纬度未设置":
-                yield event.plain_result("Please set latitude first: /signin set lat <latitude_value>")
+                yield event.plain_result("请先设置纬度: /signin set lat <纬度值>")
             elif error_msg == "经度未设置":
-                yield event.plain_result("Please set longitude first: /signin set lng <longitude_value>")
+                yield event.plain_result("请先设置经度: /signin set lng <经度值>")
             return
             
         if not config.class_id:
@@ -465,7 +495,7 @@ class DusSigninPlugin(Star):
                         # 提取所有班级信息
                         class_matches = re.findall(r'course_id="(\d+)"', content)
                         if not class_matches:
-                            yield event.plain_result("No classes found")
+                            yield event.plain_result("未找到班级")
                             return
                             
                         if len(class_matches) == 1:
@@ -480,24 +510,24 @@ class DusSigninPlugin(Star):
                                     rf'course_id="{class_id}".*?class="course_name"[^>]*>([^<]*)', 
                                     content, re.DOTALL
                                 )
-                                class_name = class_name_match.group(1) if class_name_match else "Unknown Class"
+                                class_name = class_name_match.group(1) if class_name_match else "未知班级"
                                 class_list.append(f"{i+1}. {class_name} (ID: {class_id})")
                                 
                             yield event.plain_result(
-                                f"Found {len(class_matches)} classes:\n" + 
+                                f"找到 {len(class_matches)} 个班级:\n" + 
                                 "\n".join(class_list) + 
-                                "\n\nPlease use /signin set class_id <class_id> to set class"
+                                "\n\n请使用 /signin set class_id <班级ID> 来设置班级"
                             )
                             return
                     else:
-                        yield event.plain_result("Failed to get class list, please check if cookie is correct")
+                        yield event.plain_result("获取班级列表失败，请检查Cookie是否正确")
                         return
             except Exception as e:
-                yield event.plain_result(f"Error getting class list: {str(e)}")
+                yield event.plain_result(f"获取班级列表错误: {str(e)}")
                 return
                 
         # 执行签到
-        yield event.plain_result("Executing signin...")
+        yield event.plain_result("正在执行签到...")
         result = await self._perform_signin(config)
         
         if result["success"]:
@@ -507,11 +537,11 @@ class DusSigninPlugin(Star):
             
     @signin_commands.command("config")
     async def view_config(self, event: AstrMessageEvent):
-        """View current configuration"""
+        """查看当前配置"""
         user_id = event.get_sender_id()
         config = self._get_user_config(user_id)
         
-        cookie_display = "Set" if config.cookie else "Not set"
+        cookie_display = "已设置" if config.cookie else "未设置"
         
         # 构建通知设置显示
         if config.notification_targets:
@@ -519,54 +549,57 @@ class DusSigninPlugin(Star):
             for target, level in config.notification_targets.items():
                 # 简化显示目标（只显示部分ID）
                 target_display = target[-10:] if len(target) > 10 else target
-                notification_lines.append(f"  {target_display}: {level}")
+                session_type = config.notification_types.get(target, "unknown")
+                notification_lines.append(f"  {target_display}: {level} ({session_type})")
             notification_text = "\n".join(notification_lines)
         else:
-            notification_text = "  Not set"
+            notification_text = "  未设置"
         
-        config_text = f"""Current Signin Configuration:
+        config_text = f"""当前签到配置:
 Cookie: {cookie_display}
-Latitude: {config.lat or 'Not set'}
-Longitude: {config.lng or 'Not set'}
-Class ID: {config.class_id or 'Not set'}
-GPS Offset: {config.offset}
-Auto Signin: {'Enabled' if config.auto_signin_enabled else 'Disabled'}
-Signin Time: {config.auto_signin_time}
-Notification Settings:
+纬度: {config.lat or '未设置'}
+经度: {config.lng or '未设置'}
+班级ID: {config.class_id or '未设置'}
+GPS偏移: {config.offset}
+自动签到: {'已启用' if config.auto_signin_enabled else '已禁用'}
+签到时间: {config.auto_signin_time}
+通知设置:
 {notification_text}"""
         
         yield event.plain_result(config_text)
         
     @signin_commands.command("help")
     async def show_help(self, event: AstrMessageEvent):
-        """Show help information"""
-        help_text = """DUS Signin Plugin Usage:
+        """显示帮助信息"""
+        help_text = """DUS 签到插件使用方法:
 
-🔧 Configuration Commands:
-/signin set cookie <value> - Set login cookie
-/signin set lat <value> - Set latitude coordinate
-/signin set lng <value> - Set longitude coordinate
-/signin set class_id <value> - Set class ID
-/signin set offset <value> - Set GPS coordinate offset (default: 0.000020)
-/signin set auto_time <HH:MM> - Set auto signin time
-/signin set auto_enable <enable/disable> - Enable/disable auto signin
-/signin set notification <always/never/failure_only> - Set notification level for current chat
-/signin set remove_notification - Remove notification settings for current chat
+🔧 配置命令:
+/signin set cookie <值> - 设置登录Cookie
+/signin set lat <值> - 设置纬度坐标
+/signin set lng <值> - 设置经度坐标
+/signin set class_id <值> - 设置班级ID
+/signin set offset <值> - 设置GPS坐标偏移（默认: 0.000020）
+/signin set auto_time <HH:MM> - 设置自动签到时间
+/signin set auto_enable <enable/disable> - 启用/禁用自动签到
+/signin set notification <always/never/failure_only> - 设置当前聊天的通知级别
+/signin set remove_notification - 移除当前聊天的通知设置
 
-📱 Function Commands:
-/signin now - Execute signin immediately
-/signin config - View current configuration
-/signin help - Show this help
+📱 功能命令:
+/signin now - 立即执行签到
+/signin config - 查看当前配置
+/signin help - 显示此帮助
 
-💡 Notification Features:
-- Different notification levels can be set for different chats
-- Private chat: recommended "always", Group chat: recommended "failure_only"
-- Example: Private chat set to "always", Group chat set to "failure_only"
-- Signin results will be notified according to each chat's settings
+💡 通知功能:
+- 不同聊天可以设置不同的通知级别
+- 私聊: 建议设置为 "always", 群聊: 建议设置为 "failure_only"
+- 示例: 私聊设置为 "always", 群聊设置为 "failure_only"
+- 签到结果将根据每个聊天的设置进行通知
+- 在群聊中，用户将在通知中被@提及
+- 在私聊中，通知直接发送不含@提及
 
-⚠️ Notes:
-1. Cookie/latitude/longitude are required parameters
-2. Class ID will auto-fetch class list when empty
-3. Support multi-chat notifications, each chat can set different notification levels"""
+⚠️ 注意事项:
+1. Cookie/纬度/经度是必需参数
+2. 班级ID为空时将自动获取班级列表
+3. 支持多聊天通知，每个聊天可设置不同的通知级别"""
         
         yield event.plain_result(help_text)

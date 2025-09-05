@@ -1,95 +1,95 @@
-# DUS Signin Plugin
+# DUS 签到插件
 
-This is a DUS signin plugin developed for AstrBot, supporting manual signin, scheduled signin, and signin result notification features.
+这是一个为 AstrBot 开发的 DUS 签到插件，支持手动签到、定时签到和签到结果通知功能。
 
-## Features
+## 功能特性
 
-1. **Signin Configuration** - Support setting Cookie, latitude/longitude coordinates, class ID and other signin parameters
-2. **Immediate Signin** - Execute signin immediately according to configuration
-3. **Scheduled Signin** - Support daily scheduled automatic signin
-4. **Signin Notifications** - Configurable signin result notification levels (always/never/failure_only)
+1. **签到配置** - 支持设置 Cookie、经纬度坐标、班级ID等签到参数
+2. **立即签到** - 根据配置立即执行签到
+3. **定时签到** - 支持每日定时自动签到
+4. **签到通知** - 可配置的签到结果通知级别（总是/从不/仅失败时）
 
-## Usage
+## 使用方法
 
-### Configuration Commands
-
-```
-/signin set cookie <value>           # Set login cookie (required)
-/signin set lat <value>              # Set latitude coordinate (required)
-/signin set lng <value>              # Set longitude coordinate (required)
-/signin set class_id <value>         # Set class ID (optional, auto-fetch)
-/signin set offset <value>           # Set GPS coordinate offset (default: 0.000020)
-/signin set auto_time <HH:MM>        # Set auto signin time
-/signin set auto_enable <enable/disable> # Enable/disable auto signin
-/signin set notification <level>     # Set notification level for current chat
-/signin set remove_notification     # Remove notification settings for current chat
-```
-
-### Function Commands
+### 配置命令
 
 ```
-/signin now                         # Execute signin immediately
-/signin config                      # View current configuration
-/signin help                        # Show help information
+/signin set cookie <值>             # 设置登录Cookie（必需）
+/signin set lat <值>                # 设置纬度坐标（必需）
+/signin set lng <值>                # 设置经度坐标（必需）
+/signin set class_id <值>           # 设置班级ID（可选，自动获取）
+/signin set offset <值>             # 设置GPS坐标偏移（默认：0.000020）
+/signin set auto_time <HH:MM>       # 设置自动签到时间
+/signin set auto_enable <启用/禁用>   # 启用/禁用自动签到
+/signin set notification <级别>     # 设置当前聊天的通知级别
+/signin set remove_notification    # 移除当前聊天的通知设置
 ```
 
-## Notification Features
+### 功能命令
 
-### Multi-Chat Notification Support
-- **Private Chat Notifications**: Recommended to set to "always" for real-time signin status updates
-- **Group Chat Notifications**: Recommended to set to "failure_only" for group members to remind on failures
-- **Flexible Configuration**: Different notification levels can be set for different chats without interference
-
-### Usage Examples
 ```
-# Set always notification in private chat
+/signin now                         # 立即执行签到
+/signin config                      # 查看当前配置
+/signin help                        # 显示帮助信息
+```
+
+## 通知功能
+
+### 多聊天通知支持
+- **私聊通知**：建议设置为"always"，实时获取签到状态更新
+- **群聊通知**：建议设置为"failure_only"，提醒群成员签到失败
+- **灵活配置**：不同聊天可设置不同通知级别，互不干扰
+
+### 使用示例
+```
+# 在私聊中设置总是通知
 /signin set notification always
 
-# Set failure_only notification in group chat
+# 在群聊中设置仅失败时通知
 /signin set notification failure_only
 
-# Remove notification settings for current chat
+# 移除当前聊天的通知设置
 /signin set remove_notification
 ```
 
-## GPS Offset Feature
+## GPS偏移功能
 
-The plugin supports GPS coordinate offset to add random variations to your location coordinates:
+插件支持GPS坐标偏移，为您的位置坐标添加随机变化：
 
-- **Default Offset**: 0.000020 (approximately 2 meters)
-- **Range**: Random offset between -offset and +offset is applied to both latitude and longitude
-- **Purpose**: Helps avoid detection by adding slight randomness to your GPS coordinates
-- **Configuration**: Use `/signin set offset <value>` to set custom offset value
+- **默认偏移**：0.000020（大约2米）
+- **范围**：在-偏移到+偏移之间对经纬度都应用随机偏移
+- **目的**：通过添加轻微的随机性来帮助避免检测
+- **配置**：使用 `/signin set offset <值>` 设置自定义偏移值
 
-### Example:
+### 示例：
 ```
-/signin set offset 0.000030    # Set offset to ±30 meters approximately
-/signin set offset 0.000010    # Set offset to ±10 meters approximately
-/signin set offset 0          # Disable offset (use exact coordinates)
+/signin set offset 0.000030    # 设置偏移为大约±30米
+/signin set offset 0.000010    # 设置偏移为大约±10米
+/signin set offset 0          # 禁用偏移（使用精确坐标）
 ```
 
-## Notes
+## 注意事项
 
-1. Cookie, latitude, longitude are required parameters, can be obtained from browser developer tools
-2. Class ID will auto-fetch class list when empty
-3. Support multi-chat notifications, each chat can set different notification levels
-4. Notification levels: always/never/failure_only
-5. GPS offset adds random variation to coordinates for better privacy
+1. Cookie、纬度、经度是必需参数，可通过浏览器开发者工具获取
+2. 班级ID为空时会自动获取班级列表
+3. 支持多聊天通知，每个聊天可设置不同的通知级别
+4. 通知级别：always/never/failure_only
+5. GPS偏移为坐标添加随机变化以提高隐私性
 
-## Dependencies
+## 依赖
 
 ```bash
 pip install aiohttp>=3.8.0
 ```
 
-## Key Features
+## 核心特性
 
-- **Strict HTTP Request Specification** - Strict implementation based on `signin.sh` script
-- **Smart Class Recognition** - Automatic class fetching and selection
-- **Flexible Notification System** - Support multiple notification levels
-- **Persistent Configuration** - User configuration auto-save and recovery
-- **Scheduled Task Management** - Reliable scheduled signin mechanism
+- **严格HTTP请求规范** - 基于 `signin.sh` 脚本的严格实现
+- **智能班级识别** - 自动获取和选择班级
+- **灵活通知系统** - 支持多种通知级别
+- **持久化配置** - 用户配置自动保存和恢复
+- **定时任务管理** - 可靠的定时签到机制
 
-## Technical Implementation
+## 技术实现
 
-The plugin is based on AstrBot plugin development framework, uses aiohttp for HTTP requests, supports asynchronous operations and task scheduling. Strictly implements according to the original signin script's request headers and parameter requirements to ensure signin success rate.
+该插件基于 AstrBot 插件开发框架，使用 aiohttp 进行 HTTP 请求，支持异步操作和任务调度。严格按照原始签到脚本的请求头和参数要求实现，确保签到成功率。

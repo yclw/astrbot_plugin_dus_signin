@@ -328,15 +328,15 @@ class DusSigninPlugin(Star):
                 # 构建消息组件列表，按照AstrBot文档标准
                 if session_type == "group":
                     # 群聊中@用户
-                    chain = [
+                    chain = MessageChain([
                         Comp.At(qq=user_id),
-                        Comp.Plain(f"自动签到结果: {result['message']}")
-                    ]
+                        Comp.Plain(f" 自动签到结果: {result['message']}")
+                    ])
                 else:
                     # 私聊直接发送
-                    chain = [
+                    chain = MessageChain([
                         Comp.Plain(f"自动签到结果: {result['message']}")
-                    ]
+                    ])
                 
                 await self.context.send_message(target, chain)
                 logger.info(f"已发送签到通知到: {target} (级别: {level}, 类型: {session_type})")

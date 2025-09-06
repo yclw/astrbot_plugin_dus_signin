@@ -182,6 +182,9 @@ class DusSigninPlugin(Star):
                 
     async def _perform_signin(self, config: SigninConfig) -> dict:
         """执行签到操作"""
+        logger.info("开始执行签到操作")
+        logger.info(f"配置信息 - 班级ID: {config.class_id}, 纬度: {config.lat}, 经度: {config.lng}, GPS偏移: {config.offset}")
+        
         headers = {
             'User-Agent': 'Mozilla/5.0 (Linux; Android 9; AKT-AK47 Build/USER-AK47; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/116.0.0.0 Mobile Safari/537.36 XWEB/1160065 MMWEBSDK/20231202 MMWEBID/1136 MicroMessenger/8.0.47.2560(0x28002F35) WeChat/arm64 Weixin NetType/4G Language/zh_CN ABI/arm64',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/wxpic,image/tpg,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
@@ -193,50 +196,93 @@ class DusSigninPlugin(Star):
         try:
             # 如果没有class_id，获取班级列表
             if not config.class_id:
+                logger.info("班级ID为空，正在获取班级列表")
                 class_id, class_name = await self._get_class_list(headers)
                 if not class_id:
+                    logger.error("获取班级列表失败或未找到班级")
                     return {"success": False, "message": "未找到班级或获取班级列表失败"}
+                logger.info(f"自动获取到班级: {class_name} (ID: {class_id})")
                 config.class_id = class_id
                 await self._save_user_configs()
+            else:
+                logger.info(f"使用已配置的班级ID: {config.class_id}")
             
             # 获取签到任务ID
+            logger.info("正在获取签到任务ID")
             task_id = await self._get_task_id(config.class_id, headers)
             if not task_id:
+                logger.error("未能获取到签到任务ID")
                 return {"success": False, "message": "未找到签到任务"}
+            logger.info(f"成功获取签到任务ID: {task_id}")
                 
             # 应用随机偏移
             lat_with_offset = self._apply_offset(config.lat, config.offset)
             lng_with_offset = self._apply_offset(config.lng, config.offset)
+            logger.info(f"坐标处理 - 原始: ({config.lat}, {config.lng}), 偏移后: ({lat_with_offset}, {lng_with_offset})")
             
             # 执行签到
+            logger.info("正在执行签到请求")
             result = await self._execute_signin(config.class_id, task_id, lat_with_offset, lng_with_offset, headers)
+            logger.info(f"签到结果: {result}")
             return result
             
         except Exception as e:
             logger.error(f"签到操作失败: {e}")
+            import traceback
+            logger.error(f"详细错误信息: {traceback.format_exc()}")
             return {"success": False, "message": f"签到操作异常: {str(e)}"}
             
     async def _get_class_list(self, headers: dict) -> tuple[str, str]:
         """获取班级列表，返回第一个班级的ID和名称"""
         try:
-            async with self.session.get("http://k8n.cn/student", headers=headers) as response:
+            url = "http://k8n.cn/student"
+            logger.info(f"正在请求学生主页获取班级列表: {url}")
+            
+            async with self.session.get(url, headers=headers) as response:
+                logger.info(f"学生主页响应状态: {response.status}")
+                
                 if response.status == 200:
                     content = await response.text()
+                    logger.info(f"学生主页内容长度: {len(content)}")
                     
                     # 提取班级ID
                     class_ids = re.findall(r'course_id="(\d+)"', content)
+                    logger.info(f"找到班级ID数量: {len(class_ids)}")
+                    
                     if class_ids:
+                        for i, cid in enumerate(class_ids[:5]):  # 记录前5个班级ID
+                            logger.info(f"班级ID {i+1}: {cid}")
+                            
                         class_id = class_ids[0]
+                        logger.info(f"选择第一个班级ID: {class_id}")
+                        
                         # 提取对应的班级名称
                         class_name_match = re.search(
                             rf'course_id="{class_id}".*?class="course_name"[^>]*>([^<]*)', 
                             content, re.DOTALL
                         )
                         class_name = class_name_match.group(1) if class_name_match else "未知班级"
+                        logger.info(f"班级名称: {class_name}")
+                        
                         return class_id, class_name
+                    else:
+                        logger.warning("页面中未找到班级ID")
+                        # 记录可能的错误信息
+                        if "登录" in content or "login" in content.lower():
+                            logger.error("页面显示需要登录，Cookie可能已过期")
+                        elif "错误" in content or "error" in content.lower():
+                            logger.error("页面显示错误信息")
+                        else:
+                            logger.info("页面内容预览（前500字符）：")
+                            content_preview = content[:500] if len(content) > 500 else content
+                            logger.info(content_preview)
+                else:
+                    logger.error(f"请求学生主页失败，状态码: {response.status}")
                         
         except Exception as e:
             logger.error(f"获取班级列表失败: {e}")
+            import traceback
+            logger.error(f"详细错误信息: {traceback.format_exc()}")
             
         return "", ""
         
@@ -247,16 +293,72 @@ class DusSigninPlugin(Star):
                 'Referer': f'http://k8n.cn/student/course/{class_id}'
             })
             
-            async with self.session.get(f"http://k8n.cn/student/course/{class_id}/punchs", headers=headers) as response:
+            url = f"http://k8n.cn/student/course/{class_id}/punchs"
+            logger.info(f"正在请求签到任务页面: {url}")
+            logger.info(f"使用班级ID: {class_id}")
+            
+            async with self.session.get(url, headers=headers) as response:
+                logger.info(f"签到任务页面响应状态: {response.status}")
+                
                 if response.status == 200:
                     content = await response.text()
-                    # 提取任务ID
+                    logger.info(f"签到任务页面内容长度: {len(content)}")
+                    
+                    # 记录页面的关键部分用于调试
+                    if "punch_gps" in content:
+                        logger.info("页面中包含 punch_gps 相关内容")
+                        # 提取包含 punch_gps 的行
+                        lines_with_punch = [line.strip() for line in content.split('\n') if 'punch_gps' in line]
+                        for i, line in enumerate(lines_with_punch[:5]):  # 只记录前5行
+                            logger.info(f"包含punch_gps的行 {i+1}: {line[:200]}")
+                    else:
+                        logger.warning("页面中未找到 punch_gps 相关内容")
+                        # 记录页面的部分内容用于分析
+                        content_preview = content[:1000] if len(content) > 1000 else content
+                        logger.info(f"页面内容预览: {content_preview}")
+                    
+                    # 提取任务ID - 原有的正则表达式
                     task_match = re.search(r'onclick="punch_gps\((\d+)\)"', content)
                     if task_match:
-                        return task_match.group(1)
+                        task_id = task_match.group(1)
+                        logger.info(f"成功找到签到任务ID: {task_id}")
+                        return task_id
+                    else:
+                        logger.warning("使用原有正则表达式未找到签到任务ID")
                         
+                        # 尝试其他可能的匹配模式
+                        alternative_patterns = [
+                            r'punch_gps\((\d+)\)',  # 不限制onclick
+                            r'data-id="(\d+)".*punch',  # data-id属性
+                            r'id="(\d+)".*punch',  # id属性
+                            r'/punchs.*?(\d+)',  # URL中的数字
+                            r'task.*?(\d+)',  # task相关的数字
+                        ]
+                        
+                        for pattern in alternative_patterns:
+                            alt_match = re.search(pattern, content, re.IGNORECASE)
+                            if alt_match:
+                                task_id = alt_match.group(1)
+                                logger.info(f"使用替代模式 '{pattern}' 找到可能的任务ID: {task_id}")
+                                return task_id
+                        
+                        logger.error("所有匹配模式都未找到签到任务ID")
+                        
+                        # 如果还是找不到，记录更多有用信息
+                        if "签到" in content or "打卡" in content:
+                            logger.info("页面中包含签到或打卡相关内容，但无法提取任务ID")
+                        if "没有签到任务" in content or "无签到任务" in content:
+                            logger.warning("页面显示没有签到任务")
+                        if "已签到" in content or "签到成功" in content:
+                            logger.info("页面显示已经签到")
+                            
+                else:
+                    logger.error(f"签到任务页面请求失败，状态码: {response.status}")
+                    
         except Exception as e:
             logger.error(f"获取签到任务ID失败: {e}")
+            import traceback
+            logger.error(f"详细错误信息: {traceback.format_exc()}")
             
         return ""
         
@@ -290,21 +392,52 @@ class DusSigninPlugin(Star):
                 'gps_addr': ''
             }
             
-            async with self.session.post(
-                f"http://k8n.cn/student/punchs/course/{class_id}/{task_id}",
-                headers=headers,
-                data=data
-            ) as response:
+            url = f"http://k8n.cn/student/punchs/course/{class_id}/{task_id}"
+            logger.info(f"正在发送签到请求到: {url}")
+            logger.info(f"请求数据: {data}")
+            
+            async with self.session.post(url, headers=headers, data=data) as response:
+                logger.info(f"签到请求响应状态: {response.status}")
                 
                 content = await response.text()
+                logger.info(f"签到响应内容长度: {len(content)}")
                 
-                if "签到成功" in content:
-                    return {"success": True, "message": "签到成功"}
+                # 记录响应内容用于调试
+                if content:
+                    logger.info(f"签到响应内容预览: {content[:500]}")
+                    
+                    # 检查各种可能的响应内容
+                    if "签到成功" in content:
+                        logger.info("检测到签到成功标识")
+                        return {"success": True, "message": "签到成功"}
+                    elif "已签到" in content:
+                        logger.info("检测到已签到标识")
+                        return {"success": True, "message": "已经签到"}
+                    elif "签到失败" in content:
+                        logger.warning("检测到签到失败标识")
+                        return {"success": False, "message": "签到失败"}
+                    elif "距离过远" in content or "位置不符" in content:
+                        logger.warning("检测到距离相关错误")
+                        return {"success": False, "message": "签到位置距离过远"}
+                    elif "时间不符" in content or "非签到时间" in content:
+                        logger.warning("检测到时间相关错误")
+                        return {"success": False, "message": "不在签到时间范围内"}
+                    elif "任务不存在" in content or "无效任务" in content:
+                        logger.warning("检测到任务无效错误")
+                        return {"success": False, "message": "签到任务无效或不存在"}
+                    else:
+                        logger.warning("未识别的响应内容")
+                        # 记录完整内容用于分析
+                        logger.info(f"完整响应内容: {content}")
+                        return {"success": False, "message": f"签到状态未知: {content[:100]}"}
                 else:
-                    return {"success": False, "message": "签到失败"}
+                    logger.error("签到响应内容为空")
+                    return {"success": False, "message": "签到响应为空"}
                     
         except Exception as e:
             logger.error(f"执行签到请求失败: {e}")
+            import traceback
+            logger.error(f"详细错误信息: {traceback.format_exc()}")
             return {"success": False, "message": f"签到请求异常: {str(e)}"}
             
     async def _send_signin_notification(self, config: SigninConfig, result: dict, user_id: str):
@@ -573,7 +706,7 @@ GPS偏移: {config.offset}
         """显示帮助信息"""
         help_text = """DUS 签到插件使用方法:
 
-🔧 配置命令:
+配置命令:
 /signin set cookie <值> - 设置登录Cookie
 /signin set lat <值> - 设置纬度坐标
 /signin set lng <值> - 设置经度坐标
@@ -584,12 +717,12 @@ GPS偏移: {config.offset}
 /signin set notification <always/never/failure_only> - 设置当前聊天的通知级别
 /signin set remove_notification - 移除当前聊天的通知设置
 
-📱 功能命令:
+功能命令:
 /signin now - 立即执行签到
 /signin config - 查看当前配置
 /signin help - 显示此帮助
 
-💡 通知功能:
+通知功能:
 - 不同聊天可以设置不同的通知级别
 - 私聊: 建议设置为 "always", 群聊: 建议设置为 "failure_only"
 - 示例: 私聊设置为 "always", 群聊设置为 "failure_only"
@@ -597,9 +730,8 @@ GPS偏移: {config.offset}
 - 在群聊中，用户将在通知中被@提及
 - 在私聊中，通知直接发送不含@提及
 
-⚠️ 注意事项:
+注意事项:
 1. Cookie/纬度/经度是必需参数
-2. 班级ID为空时将自动获取班级列表
-3. 支持多聊天通知，每个聊天可设置不同的通知级别"""
+2. 班级ID为空时将自动获取班级列表"""
         
         yield event.plain_result(help_text)

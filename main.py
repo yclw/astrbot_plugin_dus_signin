@@ -50,11 +50,19 @@ class DusSigninPlugin(Star):
 
     async def initialize(self):
         """插件初始化"""
+        logger.info("🚀 正在初始化DUS签到插件...")
+        logger.info("🔧 创建HTTP会话 (超时: 30秒)")
+        
         self.session = aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=30)
         )
+        
+        logger.info("📁 加载用户配置...")
         await self._load_user_configs()
-        logger.info("DUS签到插件已初始化")
+        
+        logger.info(f"✅ DUS签到插件初始化完成")
+        logger.info(f"📊 已加载 {len(self.user_configs)} 个用户配置")
+        logger.info(f"⏰ 已启动 {len(self.scheduled_tasks)} 个自动签到任务")
 
     async def terminate(self):
         """插件销毁时清理资源"""
@@ -81,41 +89,72 @@ class DusSigninPlugin(Star):
             # 从插件数据目录加载配置文件
             plugin_data_dir = StarTools.get_data_dir("dus_signin")
             config_file = plugin_data_dir / "dus_signin_configs.json"
+            
+            logger.info(f"📂 配置文件路径: {config_file}")
+            
             if config_file.exists():
+                logger.info("📄 找到配置文件，开始加载...")
+                
                 with open(config_file, 'r', encoding='utf-8') as f:
                     configs_data = json.load(f)
-                    for user_id, config_data in configs_data.items():
-                        # 兼容旧配置格式
-                        if 'notification_level' in config_data and 'notification_target' in config_data:
-                            # 旧格式转换为新格式
-                            old_level = config_data.pop('notification_level', 'always')
-                            old_target = config_data.pop('notification_target', '')
-                            config_data['notification_targets'] = {old_target: old_level} if old_target else {}
+                    
+                logger.info(f"📊 配置文件包含 {len(configs_data)} 个用户配置")
+                
+                for user_id, config_data in configs_data.items():
+                    logger.info(f"👤 处理用户 {user_id} 的配置")
+                    
+                    # 兼容旧配置格式
+                    if 'notification_level' in config_data and 'notification_target' in config_data:
+                        logger.info(f"🔄 转换用户 {user_id} 的旧格式通知配置")
+                        # 旧格式转换为新格式
+                        old_level = config_data.pop('notification_level', 'always')
+                        old_target = config_data.pop('notification_target', '')
+                        config_data['notification_targets'] = {old_target: old_level} if old_target else {}
+                    
+                    # 确保notification_targets字段存在
+                    if 'notification_targets' not in config_data:
+                        config_data['notification_targets'] = {}
+                    
+                    # 确保notification_types字段存在
+                    if 'notification_types' not in config_data:
+                        config_data['notification_types'] = {}
                         
-                        # 确保notification_targets字段存在
-                        if 'notification_targets' not in config_data:
-                            config_data['notification_targets'] = {}
-                        
-                        # 确保notification_types字段存在
-                        if 'notification_types' not in config_data:
-                            config_data['notification_types'] = {}
+                    self.user_configs[user_id] = SigninConfig(**config_data)
+                    
+                    # 记录用户配置概要
+                    config = self.user_configs[user_id]
+                    logger.info(f"📋 用户 {user_id} 配置概要:")
+                    logger.info(f"   - Cookie: {'已设置' if config.cookie else '未设置'}")
+                    logger.info(f"   - 坐标: ({config.lat}, {config.lng})")
+                    logger.info(f"   - 班级ID: {config.class_id or '未设置'}")
+                    logger.info(f"   - 自动签到: {'启用' if config.auto_signin_enabled else '禁用'}")
+                    logger.info(f"   - 通知目标: {len(config.notification_targets)} 个")
+                    
+                    # 重新启动定时任务
+                    if config_data.get('auto_signin_enabled', False):
+                        logger.info(f"⏰ 为用户 {user_id} 启动自动签到任务 (时间: {config.auto_signin_time})")
+                        await self._schedule_auto_signin(user_id)
                             
-                        self.user_configs[user_id] = SigninConfig(**config_data)
-                        
-                        # 重新启动定时任务
-                        if config_data.get('auto_signin_enabled', False):
-                            await self._schedule_auto_signin(user_id)
-                            
-                logger.info(f"已加载 {len(self.user_configs)} 个用户配置")
+                logger.info(f"✅ 成功加载 {len(self.user_configs)} 个用户配置")
+            else:
+                logger.info("📝 配置文件不存在，将创建新配置")
+                
         except Exception as e:
-            logger.error(f"加载用户配置失败: {e}")
+            logger.error(f"❌ 加载用户配置失败: {e}")
+            import traceback
+            logger.error(f"详细错误信息: {traceback.format_exc()}")
             
     async def _save_user_configs(self):
         """保存用户配置"""
         try:
+            logger.info("💾 开始保存用户配置...")
+            
             plugin_data_dir = StarTools.get_data_dir("dus_signin")
             config_file = plugin_data_dir / "dus_signin_configs.json"
             config_file.parent.mkdir(parents=True, exist_ok=True)
+            
+            logger.info(f"📂 配置保存路径: {config_file}")
+            logger.info(f"📊 需要保存 {len(self.user_configs)} 个用户配置")
             
             configs_data = {
                 user_id: asdict(config) 
@@ -124,9 +163,13 @@ class DusSigninPlugin(Star):
             
             with open(config_file, 'w', encoding='utf-8') as f:
                 json.dump(configs_data, f, ensure_ascii=False, indent=2)
+            
+            logger.info(f"✅ 用户配置保存成功")
                 
         except Exception as e:
-            logger.error(f"保存用户配置失败: {e}")
+            logger.error(f"❌ 保存用户配置失败: {e}")
+            import traceback
+            logger.error(f"详细错误信息: {traceback.format_exc()}")
             
     def _get_user_config(self, user_id: str) -> SigninConfig:
         """获取用户配置"""
@@ -136,27 +179,36 @@ class DusSigninPlugin(Star):
         
     async def _schedule_auto_signin(self, user_id: str):
         """为用户安排自动签到任务"""
+        logger.info(f"⏰ 为用户 {user_id} 安排自动签到任务")
+        
         config = self._get_user_config(user_id)
         if not config.auto_signin_enabled:
+            logger.info(f"⏸️ 用户 {user_id} 未启用自动签到，跳过任务安排")
             return
             
         # 取消现有任务
         if user_id in self.scheduled_tasks:
+            logger.info(f"🔄 取消用户 {user_id} 的现有自动签到任务")
             self.scheduled_tasks[user_id].cancel()
             
         # 创建新的定时任务
+        logger.info(f"🚀 创建用户 {user_id} 的新自动签到任务 (签到时间: {config.auto_signin_time})")
         self.scheduled_tasks[user_id] = asyncio.create_task(
             self._auto_signin_task(user_id)
         )
+        logger.info(f"✅ 用户 {user_id} 的自动签到任务已启动")
         
     async def _auto_signin_task(self, user_id: str):
         """自动签到任务"""
+        logger.info(f"🔄 用户 {user_id} 自动签到任务开始运行")
+        
         while True:
             # 每次循环都重新获取配置，确保使用最新的配置
             config = self._get_user_config(user_id)
             
             # 检查是否还启用自动签到
             if not config.auto_signin_enabled:
+                logger.info(f"⏹️ 用户 {user_id} 已禁用自动签到，任务退出")
                 break
                 
             try:
@@ -172,25 +224,46 @@ class DusSigninPlugin(Star):
                     
                 # 等待到指定时间
                 sleep_seconds = (next_run - now).total_seconds()
+                logger.info(f"⏰ 用户 {user_id} 下次签到时间: {next_run.strftime('%Y-%m-%d %H:%M:%S')}")
+                logger.info(f"⏳ 等待 {sleep_seconds:.0f} 秒 ({sleep_seconds/3600:.1f} 小时)")
+                
                 await asyncio.sleep(sleep_seconds)
                 
                 # 执行签到前再次获取最新配置
                 current_config = self._get_user_config(user_id)
-                logger.info(f"用户 {user_id} 准备执行自动签到，使用cookie: {current_config.cookie[:20]}...")
+                logger.info(f"🎯 用户 {user_id} 签到时间到，准备执行自动签到")
+                logger.info(f"🍪 使用cookie: {current_config.cookie[:20]}...")
+                
                 if current_config.auto_signin_enabled:  # 再次检查是否还启用
                     result = await self._perform_signin(current_config)
                     await self._send_signin_notification(current_config, result, user_id)
+                else:
+                    logger.info(f"⚠️ 用户 {user_id} 在签到时间点发现自动签到已被禁用")
                     
             except asyncio.CancelledError:
+                logger.info(f"🛑 用户 {user_id} 的自动签到任务被取消")
                 break
             except Exception as e:
-                logger.error(f"自动签到任务错误 [{user_id}]: {e}")
+                logger.error(f"💥 用户 {user_id} 自动签到任务发生错误: {e}")
+                import traceback
+                logger.error(f"错误堆栈: {traceback.format_exc()}")
+                logger.info(f"⏳ 等待1小时后重试...")
                 await asyncio.sleep(3600)  # 出错后等待1小时再重试
+        
+        logger.info(f"🏁 用户 {user_id} 的自动签到任务已结束")
                 
     async def _perform_signin(self, config: SigninConfig) -> dict:
         """执行签到操作"""
-        logger.info("开始执行签到操作")
-        logger.info(f"配置信息 - 班级ID: {config.class_id}, 纬度: {config.lat}, 经度: {config.lng}, GPS偏移: {config.offset}")
+        logger.info("=" * 60)
+        logger.info("🚀 开始执行签到操作")
+        logger.info(f"📋 配置信息:")
+        logger.info(f"   - 班级ID: {config.class_id}")
+        logger.info(f"   - 纬度: {config.lat}")
+        logger.info(f"   - 经度: {config.lng}")
+        logger.info(f"   - GPS偏移: {config.offset}")
+        logger.info(f"   - Cookie(前50字符): {config.cookie[:50]}...")
+        logger.info(f"   - 自动签到启用: {config.auto_signin_enabled}")
+        logger.info(f"   - 签到时间: {config.auto_signin_time}")
         
         headers = {
             'User-Agent': 'Mozilla/5.0 (Linux; Android 9; AKT-AK47 Build/USER-AK47; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/116.0.0.0 Mobile Safari/537.36 XWEB/1160065 MMWEBSDK/20231202 MMWEBID/1136 MicroMessenger/8.0.47.2560(0x28002F35) WeChat/arm64 Weixin NetType/4G Language/zh_CN ABI/arm64',
@@ -200,37 +273,45 @@ class DusSigninPlugin(Star):
             'X-Requested-With': 'com.tencent.mm'
         }
         
+        logger.info(f"🌐 HTTP请求头:")
+        logger.info(f"   - User-Agent: {headers['User-Agent'][:80]}...")
+        logger.info(f"   - Cookie: {headers['Cookie'][:80]}...")
+        
         try:
             # 如果没有class_id，获取班级列表
             if not config.class_id:
-                logger.info("班级ID为空，正在获取班级列表")
+                logger.info("🔍 步骤1: 班级ID为空，正在获取班级列表")
                 class_id, class_name = await self._get_class_list(headers)
                 if not class_id:
-                    logger.error("获取班级列表失败或未找到班级")
+                    logger.error("❌ 获取班级列表失败或未找到班级")
                     return {"success": False, "message": "未找到班级或获取班级列表失败"}
-                logger.info(f"自动获取到班级: {class_name} (ID: {class_id})")
+                logger.info(f"✅ 自动获取到班级: {class_name} (ID: {class_id})")
                 config.class_id = class_id
                 await self._save_user_configs()
             else:
-                logger.info(f"使用已配置的班级ID: {config.class_id}")
+                logger.info(f"📌 步骤1: 使用已配置的班级ID: {config.class_id}")
             
             # 获取签到任务ID
-            logger.info("正在获取签到任务ID")
+            logger.info("🔍 步骤2: 正在获取签到任务ID")
             task_id = await self._get_task_id(config.class_id, headers)
             if not task_id:
-                logger.error("未能获取到签到任务ID")
+                logger.error("❌ 未能获取到签到任务ID")
                 return {"success": False, "message": "未找到签到任务"}
-            logger.info(f"成功获取签到任务ID: {task_id}")
+            logger.info(f"✅ 步骤2: 成功获取签到任务ID: {task_id}")
                 
             # 应用随机偏移
+            logger.info("🎯 步骤3: 处理GPS坐标")
             lat_with_offset = self._apply_offset(config.lat, config.offset)
             lng_with_offset = self._apply_offset(config.lng, config.offset)
-            logger.info(f"坐标处理 - 原始: ({config.lat}, {config.lng}), 偏移后: ({lat_with_offset}, {lng_with_offset})")
+            logger.info(f"   原始坐标: ({config.lat}, {config.lng})")
+            logger.info(f"   偏移后坐标: ({lat_with_offset}, {lng_with_offset})")
+            logger.info(f"   偏移范围: ±{config.offset}")
             
             # 执行签到
-            logger.info("正在执行签到请求")
+            logger.info("📡 步骤4: 正在执行签到请求")
             result = await self._execute_signin(config.class_id, task_id, lat_with_offset, lng_with_offset, headers)
-            logger.info(f"签到结果: {result}")
+            logger.info(f"🏁 最终签到结果: {result}")
+            logger.info("=" * 60)
             return result
             
         except Exception as e:
@@ -406,6 +487,8 @@ class DusSigninPlugin(Star):
     async def _execute_signin(self, class_id: str, task_id: str, lat: str, lng: str, headers: dict) -> dict:
         """执行签到请求"""
         try:
+            logger.info("🔧 准备签到请求...")
+            
             headers.update({
                 'Content-Type': 'application/x-www-form-urlencoded',
                 'Origin': 'http://k8n.cn',
@@ -422,45 +505,49 @@ class DusSigninPlugin(Star):
             }
             
             url = f"http://k8n.cn/student/punchs/course/{class_id}/{task_id}"
-            logger.info(f"正在发送签到请求到: {url}")
-            logger.info(f"请求数据: {data}")
+            logger.info(f"📤 请求URL: {url}")
+            logger.info(f"📦 请求数据:")
+            for key, value in data.items():
+                logger.info(f"   - {key}: {value}")
             
+            logger.info("🌐 发送签到请求...")
             async with self.session.post(url, headers=headers, data=data) as response:
-                logger.info(f"签到请求响应状态: {response.status}")
+                logger.info(f"📨 响应状态码: {response.status}")
+                logger.info(f"📨 响应头: {dict(response.headers)}")
                 
                 content = await response.text()
-                logger.info(f"签到响应内容长度: {len(content)}")
+                logger.info(f"📄 响应内容长度: {len(content)} 字符")
                 
                 # 记录响应内容用于调试
                 if content:
-                    logger.info(f"签到响应内容预览: {content[:500]}")
+                    logger.info(f"📋 响应内容预览(前500字符): {content[:500]}")
                     
                     # 检查各种可能的响应内容
                     if "签到成功" in content:
-                        logger.info("检测到签到成功标识")
+                        logger.info("✅ 检测到签到成功标识")
                         return {"success": True, "message": "签到成功"}
                     elif "已签到" in content:
-                        logger.info("检测到已签到标识")
+                        logger.info("🟡 检测到已签到标识")
                         return {"success": True, "message": "已经签到"}
                     elif "签到失败" in content:
-                        logger.warning("检测到签到失败标识")
+                        logger.warning("❌ 检测到签到失败标识")
                         return {"success": False, "message": "签到失败"}
                     elif "距离过远" in content or "位置不符" in content:
-                        logger.warning("检测到距离相关错误")
+                        logger.warning("📍 检测到距离相关错误")
                         return {"success": False, "message": "签到位置距离过远"}
                     elif "时间不符" in content or "非签到时间" in content:
-                        logger.warning("检测到时间相关错误")
+                        logger.warning("⏰ 检测到时间相关错误")
                         return {"success": False, "message": "不在签到时间范围内"}
                     elif "任务不存在" in content or "无效任务" in content:
-                        logger.warning("检测到任务无效错误")
+                        logger.warning("🚫 检测到任务无效错误")
                         return {"success": False, "message": "签到任务无效或不存在"}
                     else:
-                        logger.warning("未识别的响应内容")
+                        logger.warning("❓ 未识别的响应内容")
                         # 记录完整内容用于分析
-                        logger.info(f"完整响应内容: {content}")
+                        logger.warning(f"📄 完整响应内容: {content}")
                         return {"success": False, "message": f"签到状态未知: {content[:100]}"}
                 else:
-                    logger.error("签到响应内容为空")
+                    logger.error("⚠️ 签到响应内容为空")
                     return {"success": False, "message": "签到响应为空"}
                     
         except Exception as e:
@@ -471,13 +558,19 @@ class DusSigninPlugin(Star):
             
     async def _send_signin_notification(self, config: SigninConfig, result: dict, user_id: str):
         """发送签到通知"""
+        logger.info(f"📢 开始发送用户 {user_id} 的签到通知")
+        logger.info(f"📋 通知目标数量: {len(config.notification_targets)}")
         
         # 向所有配置的通知目标发送通知
         for target, level in config.notification_targets.items():
+            logger.info(f"📤 处理通知目标: {target} (级别: {level})")
+            
             # 检查是否需要发送通知
             if level == "never":
+                logger.info(f"⏭️ 跳过通知 - 级别设置为never")
                 continue
             if level == "failure_only" and result["success"]:
+                logger.info(f"⏭️ 跳过通知 - 级别为failure_only且签到成功")
                 continue
                 
             try:
@@ -486,6 +579,8 @@ class DusSigninPlugin(Star):
                 if not session_type:
                     # 兼容旧数据，通过target特征判断
                     session_type = "group" if "group" in target.lower() or len(target.split("_")) > 1 else "private"
+                
+                logger.info(f"📝 构建 {session_type} 类型消息")
                 
                 # 构建消息组件列表，按照AstrBot文档标准
                 if session_type == "group":
@@ -500,10 +595,15 @@ class DusSigninPlugin(Star):
                         Comp.Plain(f"自动签到结果: {result['message']}")
                     ])
                 
+                logger.info(f"🚀 发送通知到: {target}")
                 await self.context.send_message(target, chain)
-                logger.info(f"已发送签到通知到: {target} (级别: {level}, 类型: {session_type})")
+                logger.info(f"✅ 成功发送签到通知到: {target} (级别: {level}, 类型: {session_type})")
             except Exception as e:
-                logger.error(f"发送签到通知失败 [{target}]: {e}")
+                logger.error(f"❌ 发送签到通知失败 [{target}]: {e}")
+                import traceback
+                logger.error(f"通知发送错误详情: {traceback.format_exc()}")
+        
+        logger.info(f"📢 用户 {user_id} 的签到通知发送完成")
             
     @filter.command_group("signin")
     def signin_commands(self):
@@ -626,11 +726,15 @@ class DusSigninPlugin(Star):
     async def manual_signin(self, event: AstrMessageEvent):
         """立即执行签到"""
         user_id = event.get_sender_id()
+        logger.info(f"🎯 用户 {user_id} 发起手动签到请求")
+        
         config = self._get_user_config(user_id)
+        logger.info(f"📋 加载用户 {user_id} 的配置: Cookie={'已设置' if config.cookie else '未设置'}, 坐标=({config.lat}, {config.lng})")
         
         # 检查配置完整性
         is_complete, error_msg = config.is_complete()
         if not is_complete:
+            logger.warning(f"⚠️ 用户 {user_id} 配置不完整: {error_msg}")
             if error_msg == "Cookie未设置":
                 yield event.plain_result("请先设置Cookie: /signin set cookie <你的Cookie>")
             elif error_msg == "纬度未设置":
@@ -638,6 +742,8 @@ class DusSigninPlugin(Star):
             elif error_msg == "经度未设置":
                 yield event.plain_result("请先设置经度: /signin set lng <经度值>")
             return
+        
+        logger.info(f"✅ 用户 {user_id} 配置完整，开始手动签到流程")
             
         if not config.class_id:
             # 获取班级列表
@@ -689,13 +795,16 @@ class DusSigninPlugin(Star):
                 return
                 
         # 执行签到
+        logger.info(f"🚀 开始为用户 {user_id} 执行手动签到")
         yield event.plain_result("正在执行签到...")
         try:
             result = await self._perform_signin(config)
             
             if result["success"]:
+                logger.info(f"✅ 用户 {user_id} 手动签到成功: {result['message']}")
                 yield event.plain_result(f"✅ {result['message']}")
             else:
+                logger.warning(f"❌ 用户 {user_id} 手动签到失败: {result['message']}")
                 # 如果是Cookie过期，提供更详细的帮助信息
                 if "Cookie已过期" in result["message"]:
                     yield event.plain_result(f"❌ {result['message']}\n\n💡 解决方法：\n使用 /signin set cookie <新的Cookie值> 更新Cookie")
@@ -703,7 +812,9 @@ class DusSigninPlugin(Star):
                     yield event.plain_result(f"❌ {result['message']}")
                     
         except Exception as e:
-            logger.error(f"手动签到异常: {e}")
+            logger.error(f"💥 用户 {user_id} 手动签到异常: {e}")
+            import traceback
+            logger.error(f"详细错误堆栈: {traceback.format_exc()}")
             yield event.plain_result("❌ 签到过程中发生异常，请查看日志详情")
             
     @signin_commands.command("config")

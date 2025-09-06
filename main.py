@@ -232,7 +232,16 @@ class DusSigninPlugin(Star):
                 # 执行签到前再次获取最新配置
                 current_config = self._get_user_config(user_id)
                 logger.info(f"🎯 用户 {user_id} 签到时间到，准备执行自动签到")
-                logger.info(f"🍪 使用cookie: {current_config.cookie[:20]}...")
+                
+                # 详细打印自动签到时使用的配置
+                logger.info(f"📋 用户 {user_id} 自动签到使用的配置:")
+                logger.info(f"   🍪 Cookie: {current_config.cookie[:80]}..." if current_config.cookie else "   🍪 Cookie: 未设置")
+                logger.info(f"   📍 纬度 (lat): {current_config.lat}")
+                logger.info(f"   📍 经度 (lng): {current_config.lng}")
+                logger.info(f"   🏫 班级ID: {current_config.class_id}")
+                logger.info(f"   🎯 GPS偏移: {current_config.offset}")
+                logger.info(f"   ⏰ 自动签到: {'启用' if current_config.auto_signin_enabled else '禁用'}")
+                logger.info(f"   ⏰ 签到时间: {current_config.auto_signin_time}")
                 
                 if current_config.auto_signin_enabled:  # 再次检查是否还启用
                     result = await self._perform_signin(current_config)
@@ -256,14 +265,29 @@ class DusSigninPlugin(Star):
         """执行签到操作"""
         logger.info("=" * 60)
         logger.info("🚀 开始执行签到操作")
-        logger.info(f"📋 配置信息:")
-        logger.info(f"   - 班级ID: {config.class_id}")
-        logger.info(f"   - 纬度: {config.lat}")
-        logger.info(f"   - 经度: {config.lng}")
-        logger.info(f"   - GPS偏移: {config.offset}")
-        logger.info(f"   - Cookie(前50字符): {config.cookie[:50]}...")
-        logger.info(f"   - 自动签到启用: {config.auto_signin_enabled}")
-        logger.info(f"   - 签到时间: {config.auto_signin_time}")
+        logger.info(f"📋 详细配置信息:")
+        logger.info(f"   🏫 班级ID: {config.class_id}")
+        logger.info(f"   📍 纬度 (lat): {config.lat}")
+        logger.info(f"   📍 经度 (lng): {config.lng}")
+        logger.info(f"   🎯 GPS偏移: {config.offset}")
+        logger.info(f"   🍪 Cookie(前100字符): {config.cookie[:100]}..." if len(config.cookie) > 100 else f"   🍪 Cookie: {config.cookie}")
+        logger.info(f"   ⏰ 自动签到启用: {config.auto_signin_enabled}")
+        logger.info(f"   ⏰ 签到时间: {config.auto_signin_time}")
+        logger.info(f"   📢 通知目标: {len(config.notification_targets)} 个")
+        
+        # 如果cookie存在，显示更多cookie信息用于调试
+        if config.cookie:
+            logger.info(f"   🔍 Cookie详情:")
+            logger.info(f"       长度: {len(config.cookie)} 字符")
+            # 提取关键的cookie字段
+            cookie_parts = config.cookie.split(';')
+            for part in cookie_parts[:5]:  # 只显示前5个部分，避免日志过长
+                if '=' in part:
+                    key, value = part.strip().split('=', 1)
+                    if len(value) > 50:
+                        logger.info(f"       {key}: {value[:20]}...({len(value)} chars)")
+                    else:
+                        logger.info(f"       {key}: {value}")
         
         headers = {
             'User-Agent': 'Mozilla/5.0 (Linux; Android 9; AKT-AK47 Build/USER-AK47; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/116.0.0.0 Mobile Safari/537.36 XWEB/1160065 MMWEBSDK/20231202 MMWEBID/1136 MicroMessenger/8.0.47.2560(0x28002F35) WeChat/arm64 Weixin NetType/4G Language/zh_CN ABI/arm64',
@@ -614,99 +638,158 @@ class DusSigninPlugin(Star):
     async def set_config(self, event: AstrMessageEvent, param: str, value: str = ""):
         """设置签到配置参数"""
         user_id = event.get_sender_id()
-        config = self._get_user_config(user_id)
+        logger.info(f"⚙️ 用户 {user_id} 设置配置参数: {param}")
         
+        config = self._get_user_config(user_id)
         param = param.lower()
         
         if param == "cookie":
+            logger.info(f"🍪 用户 {user_id} 设置Cookie:")
+            logger.info(f"   旧Cookie: {config.cookie[:50]}..." if config.cookie else "   旧Cookie: 未设置")
+            logger.info(f"   新Cookie: {value[:50]}..." if value else "   新Cookie: 空值")
+            logger.info(f"   Cookie长度: {len(value)} 字符")
+            
             config.cookie = value
             await self._save_user_configs()
             yield event.plain_result("Cookie设置成功")
             
         elif param == "lat":
+            logger.info(f"📍 用户 {user_id} 设置纬度:")
+            logger.info(f"   旧纬度: {config.lat}")
+            logger.info(f"   新纬度: {value}")
+            
             config.lat = value
             await self._save_user_configs()
             yield event.plain_result(f"纬度已设置为: {value}")
             
         elif param == "lng":
+            logger.info(f"📍 用户 {user_id} 设置经度:")
+            logger.info(f"   旧经度: {config.lng}")
+            logger.info(f"   新经度: {value}")
+            
             config.lng = value
             await self._save_user_configs()
             yield event.plain_result(f"经度已设置为: {value}")
             
         elif param == "class_id":
+            logger.info(f"🏫 用户 {user_id} 设置班级ID:")
+            logger.info(f"   旧班级ID: {config.class_id}")
+            logger.info(f"   新班级ID: {value}")
+            
             config.class_id = value
             await self._save_user_configs()
             yield event.plain_result(f"班级ID已设置为: {value}")
             
         elif param == "auto_time":
+            logger.info(f"⏰ 用户 {user_id} 设置自动签到时间:")
+            logger.info(f"   旧时间: {config.auto_signin_time}")
+            logger.info(f"   新时间: {value}")
+            
             if re.match(r'^\d{1,2}:\d{2}$', value):
                 config.auto_signin_time = value
                 await self._save_user_configs()
                 
                 # 重新安排定时任务
                 if config.auto_signin_enabled:
+                    logger.info(f"🔄 重新安排用户 {user_id} 的自动签到任务")
                     await self._schedule_auto_signin(user_id)
                     
                 yield event.plain_result(f"自动签到时间已设置为: {value}")
             else:
+                logger.warning(f"⚠️ 用户 {user_id} 时间格式错误: {value}")
                 yield event.plain_result("时间格式错误，请使用HH:MM格式，例如：08:30")
                 
         elif param == "auto_enable":
+            logger.info(f"🎛️ 用户 {user_id} 设置自动签到启用状态:")
+            logger.info(f"   当前状态: {'启用' if config.auto_signin_enabled else '禁用'}")
+            logger.info(f"   设置值: {value}")
+            
             if value.lower() in ["true", "1", "yes", "enable"]:
+                logger.info(f"✅ 为用户 {user_id} 启用自动签到")
                 config.auto_signin_enabled = True
                 await self._save_user_configs()
                 await self._schedule_auto_signin(user_id)
                 yield event.plain_result("自动签到已启用")
             elif value.lower() in ["false", "0", "no", "disable"]:
+                logger.info(f"❌ 为用户 {user_id} 禁用自动签到")
                 config.auto_signin_enabled = False
                 await self._save_user_configs()
                 
                 # 取消定时任务
                 if user_id in self.scheduled_tasks:
+                    logger.info(f"🛑 取消用户 {user_id} 的定时任务")
                     self.scheduled_tasks[user_id].cancel()
                     del self.scheduled_tasks[user_id]
                     
                 yield event.plain_result("自动签到已禁用")
             else:
+                logger.warning(f"⚠️ 用户 {user_id} 自动签到状态设置值无效: {value}")
                 yield event.plain_result("请使用: enable/disable 或 true/false")
                 
         elif param == "notification":
+            session_type = "group" if event.get_group_id() else "private"
+            logger.info(f"📢 用户 {user_id} 设置通知级别:")
+            logger.info(f"   会话类型: {session_type}")
+            logger.info(f"   会话标识: {event.unified_msg_origin}")
+            logger.info(f"   当前通知级别: {config.notification_targets.get(event.unified_msg_origin, '未设置')}")
+            logger.info(f"   新通知级别: {value}")
+            
             if value in ["always", "never", "failure_only"]:
                 # 在当前会话设置通知级别
                 config.notification_targets[event.unified_msg_origin] = value
                 
                 # 记录会话类型
-                session_type = "group" if event.get_group_id() else "private"
                 config.notification_types[event.unified_msg_origin] = session_type
                 
                 await self._save_user_configs()
+                logger.info(f"✅ 已为用户 {user_id} 设置 {session_type} 通知级别为: {value}")
                 
                 yield event.plain_result(f"已为当前{session_type}聊天设置通知级别为: {value}")
             else:
+                logger.warning(f"⚠️ 用户 {user_id} 通知级别设置值无效: {value}")
                 yield event.plain_result("通知级别只能是: always/never/failure_only")
                 
         elif param == "offset":
+            logger.info(f"🎯 用户 {user_id} 设置GPS偏移:")
+            logger.info(f"   当前偏移: {config.offset}")
+            logger.info(f"   新偏移: {value}")
+            
             try:
                 offset_value = float(value)
                 if offset_value < 0:
+                    logger.warning(f"⚠️ 用户 {user_id} 偏移值不能为负数: {offset_value}")
                     yield event.plain_result("偏移值不能为负数")
                     return
+                
                 config.offset = offset_value
                 await self._save_user_configs()
+                logger.info(f"✅ 用户 {user_id} GPS偏移设置成功: {offset_value}")
                 yield event.plain_result(f"GPS偏移已设置为: {offset_value}")
             except ValueError:
+                logger.warning(f"⚠️ 用户 {user_id} 无效的偏移值: {value}")
                 yield event.plain_result("无效的偏移值，请输入数字")
                 
         elif param == "remove_notification":
+            session_type = "group" if event.get_group_id() else "private"
+            logger.info(f"🗑️ 用户 {user_id} 移除通知设置:")
+            logger.info(f"   会话类型: {session_type}")
+            logger.info(f"   会话标识: {event.unified_msg_origin}")
+            logger.info(f"   当前是否有设置: {'是' if event.unified_msg_origin in config.notification_targets else '否'}")
+            
             if event.unified_msg_origin in config.notification_targets:
+                old_level = config.notification_targets[event.unified_msg_origin]
+                logger.info(f"   移除的通知级别: {old_level}")
+                
                 del config.notification_targets[event.unified_msg_origin]
                 # 同时删除会话类型记录
                 if event.unified_msg_origin in config.notification_types:
                     del config.notification_types[event.unified_msg_origin]
                 await self._save_user_configs()
-                session_type = "group" if event.get_group_id() else "private"
+                
+                logger.info(f"✅ 已移除用户 {user_id} 在 {session_type} 中的通知设置")
                 yield event.plain_result(f"已移除当前{session_type}聊天的通知设置")
             else:
+                logger.info(f"ℹ️ 用户 {user_id} 在当前 {session_type} 中没有通知设置")
                 yield event.plain_result("当前聊天没有通知设置")
         else:
             yield event.plain_result(
@@ -729,7 +812,22 @@ class DusSigninPlugin(Star):
         logger.info(f"🎯 用户 {user_id} 发起手动签到请求")
         
         config = self._get_user_config(user_id)
-        logger.info(f"📋 加载用户 {user_id} 的配置: Cookie={'已设置' if config.cookie else '未设置'}, 坐标=({config.lat}, {config.lng})")
+        
+        # 详细打印用户配置信息
+        logger.info(f"📋 用户 {user_id} 完整配置信息:")
+        logger.info(f"   🍪 Cookie: {config.cookie[:80]}..." if config.cookie else "   🍪 Cookie: 未设置")
+        logger.info(f"   📍 纬度 (lat): {config.lat}")
+        logger.info(f"   📍 经度 (lng): {config.lng}")
+        logger.info(f"   🏫 班级ID: {config.class_id}")
+        logger.info(f"   🎯 GPS偏移: {config.offset}")
+        logger.info(f"   ⏰ 自动签到: {'启用' if config.auto_signin_enabled else '禁用'}")
+        logger.info(f"   ⏰ 签到时间: {config.auto_signin_time}")
+        logger.info(f"   📢 通知目标数量: {len(config.notification_targets)}")
+        if config.notification_targets:
+            for target, level in config.notification_targets.items():
+                target_display = target[-15:] if len(target) > 15 else target
+                session_type = config.notification_types.get(target, "unknown")
+                logger.info(f"       - {target_display}: {level} ({session_type})")
         
         # 检查配置完整性
         is_complete, error_msg = config.is_complete()

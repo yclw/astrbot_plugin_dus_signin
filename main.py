@@ -227,10 +227,16 @@ class DusSigninPlugin(Star):
             return result
             
         except Exception as e:
-            logger.error(f"签到操作失败: {e}")
-            import traceback
-            logger.error(f"详细错误信息: {traceback.format_exc()}")
-            return {"success": False, "message": f"签到操作异常: {str(e)}"}
+            # 检查是否是Cookie过期异常
+            if str(e).startswith("COOKIE_EXPIRED:"):
+                error_msg = str(e).split(":", 1)[1]  # 提取冒号后面的错误信息
+                logger.error(f"Cookie过期: {error_msg}")
+                return {"success": False, "message": error_msg}
+            else:
+                logger.error(f"签到操作失败: {e}")
+                import traceback
+                logger.error(f"详细错误信息: {traceback.format_exc()}")
+                return {"success": False, "message": f"签到操作异常: {str(e)}"}
             
     async def _get_class_list(self, headers: dict) -> tuple[str, str]:
         """获取班级列表，返回第一个班级的ID和名称"""
@@ -276,13 +282,21 @@ class DusSigninPlugin(Star):
                             logger.info("页面内容预览（前500字符）：")
                             content_preview = content[:500] if len(content) > 500 else content
                             logger.info(content_preview)
+                elif response.status == 403:
+                    logger.error("学生主页访问被拒绝 (403)，Cookie可能已过期")
+                    # 抛出特殊异常，带有明确的Cookie过期信息
+                    raise Exception("COOKIE_EXPIRED:Cookie已过期，请重新设置Cookie")
                 else:
                     logger.error(f"请求学生主页失败，状态码: {response.status}")
                         
         except Exception as e:
-            logger.error(f"获取班级列表失败: {e}")
-            import traceback
-            logger.error(f"详细错误信息: {traceback.format_exc()}")
+            # 如果是Cookie过期异常，直接向上抛出
+            if str(e).startswith("COOKIE_EXPIRED:"):
+                raise e
+            else:
+                logger.error(f"获取班级列表失败: {e}")
+                import traceback
+                logger.error(f"详细错误信息: {traceback.format_exc()}")
             
         return "", ""
         
@@ -352,13 +366,21 @@ class DusSigninPlugin(Star):
                         if "已签到" in content or "签到成功" in content:
                             logger.info("页面显示已经签到")
                             
+                elif response.status == 403:
+                    logger.error("签到任务页面访问被拒绝 (403)，Cookie可能已过期")
+                    # 抛出特殊异常，带有明确的Cookie过期信息
+                    raise Exception("COOKIE_EXPIRED:Cookie已过期，请重新设置Cookie")
                 else:
                     logger.error(f"签到任务页面请求失败，状态码: {response.status}")
                     
         except Exception as e:
-            logger.error(f"获取签到任务ID失败: {e}")
-            import traceback
-            logger.error(f"详细错误信息: {traceback.format_exc()}")
+            # 如果是Cookie过期异常，直接向上抛出
+            if str(e).startswith("COOKIE_EXPIRED:"):
+                raise e
+            else:
+                logger.error(f"获取签到任务ID失败: {e}")
+                import traceback
+                logger.error(f"详细错误信息: {traceback.format_exc()}")
             
         return ""
         
@@ -661,12 +683,21 @@ class DusSigninPlugin(Star):
                 
         # 执行签到
         yield event.plain_result("正在执行签到...")
-        result = await self._perform_signin(config)
-        
-        if result["success"]:
-            yield event.plain_result(f"✅ {result['message']}")
-        else:
-            yield event.plain_result(f"❌ {result['message']}")
+        try:
+            result = await self._perform_signin(config)
+            
+            if result["success"]:
+                yield event.plain_result(f"✅ {result['message']}")
+            else:
+                # 如果是Cookie过期，提供更详细的帮助信息
+                if "Cookie已过期" in result["message"]:
+                    yield event.plain_result(f"❌ {result['message']}\n\n💡 解决方法：\n使用 /signin set cookie <新的Cookie值> 更新Cookie")
+                else:
+                    yield event.plain_result(f"❌ {result['message']}")
+                    
+        except Exception as e:
+            logger.error(f"手动签到异常: {e}")
+            yield event.plain_result("❌ 签到过程中发生异常，请查看日志详情")
             
     @signin_commands.command("config")
     async def view_config(self, event: AstrMessageEvent):

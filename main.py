@@ -638,18 +638,29 @@ class DusSigninPlugin(Star):
         pass
         
     @signin_commands.command("set")
-    async def set_config(self, event: AstrMessageEvent, param: str, *args):
+    async def set_config(self, event: AstrMessageEvent):
         """设置签到配置参数"""
         user_id = event.get_sender_id()
-        logger.info(f"⚙️ 用户 {user_id} 设置配置参数: {param}")
-        logger.info(f"📝 接收到的参数: {args}")
+        logger.info(f"⚙️ 用户 {user_id} 设置配置参数")
         
-        # 将所有参数重新组合成完整的值
-        value = " ".join(args) if args else ""
-        logger.info(f"🔗 组合后的值: {value[:100]}..." if len(value) > 100 else f"🔗 组合后的值: {value}")
+        # 从消息中解析参数
+        message_text = event.message_obj.message_str.strip()
+        logger.info(f"📝 完整消息: {message_text}")
+        
+        # 解析命令: /signin set param value...
+        parts = message_text.split(None, 3)  # 分割为最多4部分：/signin set param value
+        if len(parts) < 3:
+            yield event.plain_result("使用方法: /signin set <参数名> <值>")
+            return
+            
+        param = parts[2].lower()  # 第三部分是参数名
+        value = parts[3] if len(parts) > 3 else ""  # 第四部分及以后是值
+        
+        logger.info(f"📋 解析结果:")
+        logger.info(f"   - 参数名: {param}")
+        logger.info(f"   - 参数值: {value[:100]}..." if len(value) > 100 else f"   - 参数值: {value}")
         
         config = self._get_user_config(user_id)
-        param = param.lower()
         
         if param == "cookie":
             logger.info(f"🍪 用户 {user_id} 设置Cookie:")

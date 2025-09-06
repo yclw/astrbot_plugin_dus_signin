@@ -151,9 +151,14 @@ class DusSigninPlugin(Star):
         
     async def _auto_signin_task(self, user_id: str):
         """自动签到任务"""
-        config = self._get_user_config(user_id)
-        
-        while config.auto_signin_enabled:
+        while True:
+            # 每次循环都重新获取配置，确保使用最新的配置
+            config = self._get_user_config(user_id)
+            
+            # 检查是否还启用自动签到
+            if not config.auto_signin_enabled:
+                break
+                
             try:
                 # 解析时间
                 hour, minute = map(int, config.auto_signin_time.split(':'))
@@ -169,10 +174,12 @@ class DusSigninPlugin(Star):
                 sleep_seconds = (next_run - now).total_seconds()
                 await asyncio.sleep(sleep_seconds)
                 
-                # 执行签到
-                if config.auto_signin_enabled:  # 再次检查是否还启用
-                    result = await self._perform_signin(config)
-                    await self._send_signin_notification(config, result, user_id)
+                # 执行签到前再次获取最新配置
+                current_config = self._get_user_config(user_id)
+                logger.info(f"用户 {user_id} 准备执行自动签到，使用cookie: {current_config.cookie[:20]}...")
+                if current_config.auto_signin_enabled:  # 再次检查是否还启用
+                    result = await self._perform_signin(current_config)
+                    await self._send_signin_notification(current_config, result, user_id)
                     
             except asyncio.CancelledError:
                 break

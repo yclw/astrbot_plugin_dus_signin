@@ -53,14 +53,17 @@ class DusSigninPlugin(Star):
         logger.info("🚀 正在初始化DUS签到插件...")
         logger.info("🔧 创建HTTP会话 (超时: 30秒)")
         
+        # 使用DummyCookieJar禁用自动cookie管理，避免用户间cookie混淆
+        logger.info("🍪 禁用自动Cookie管理，确保用户Cookie隔离")
         self.session = aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=30)
+            timeout=aiohttp.ClientTimeout(total=30),
+            cookie_jar=aiohttp.DummyCookieJar()
         )
         
         logger.info("📁 加载用户配置...")
         await self._load_user_configs()
         
-        logger.info(f"✅ DUS签到插件初始化完成")
+        logger.info(f"✅ DUS签到插件初始化完成 (已启用Cookie隔离保护)")
         logger.info(f"📊 已加载 {len(self.user_configs)} 个用户配置")
         logger.info(f"⏰ 已启动 {len(self.scheduled_tasks)} 个自动签到任务")
 

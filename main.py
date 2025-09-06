@@ -638,10 +638,15 @@ class DusSigninPlugin(Star):
         pass
         
     @signin_commands.command("set")
-    async def set_config(self, event: AstrMessageEvent, param: str, value: str = ""):
+    async def set_config(self, event: AstrMessageEvent, param: str, *args):
         """设置签到配置参数"""
         user_id = event.get_sender_id()
         logger.info(f"⚙️ 用户 {user_id} 设置配置参数: {param}")
+        logger.info(f"📝 接收到的参数: {args}")
+        
+        # 将所有参数重新组合成完整的值
+        value = " ".join(args) if args else ""
+        logger.info(f"🔗 组合后的值: {value[:100]}..." if len(value) > 100 else f"🔗 组合后的值: {value}")
         
         config = self._get_user_config(user_id)
         param = param.lower()
@@ -649,12 +654,28 @@ class DusSigninPlugin(Star):
         if param == "cookie":
             logger.info(f"🍪 用户 {user_id} 设置Cookie:")
             logger.info(f"   旧Cookie: {config.cookie[:50]}..." if config.cookie else "   旧Cookie: 未设置")
-            logger.info(f"   新Cookie: {value[:50]}..." if value else "   新Cookie: 空值")
-            logger.info(f"   Cookie长度: {len(value)} 字符")
+            logger.info(f"   原始Cookie: {value[:50]}..." if value else "   原始Cookie: 空值")
+            logger.info(f"   原始Cookie长度: {len(value)} 字符")
             
-            config.cookie = value
+            # 自动清理cookie中的换行符和多余的空白字符，但保留正常的空格分隔符
+            if value:
+                # 替换换行符和制表符为空格，然后清理多余的空格
+                cleaned_value = ' '.join(value.replace('\n', ' ').replace('\r', ' ').replace('\t', ' ').split())
+            else:
+                cleaned_value = ""
+            
+            logger.info(f"   清理后Cookie: {cleaned_value[:50]}..." if cleaned_value else "   清理后Cookie: 空值")
+            logger.info(f"   清理后Cookie长度: {len(cleaned_value)} 字符")
+            if len(value) != len(cleaned_value):
+                logger.info(f"   🧹 已自动清理了 {len(value) - len(cleaned_value)} 个多余的空白字符")
+            
+            config.cookie = cleaned_value
             await self._save_user_configs()
-            yield event.plain_result("Cookie设置成功")
+            
+            if len(value) != len(cleaned_value):
+                yield event.plain_result(f"Cookie设置成功 (已自动清理 {len(value) - len(cleaned_value)} 个多余的空白字符)")
+            else:
+                yield event.plain_result("Cookie设置成功")
             
         elif param == "lat":
             logger.info(f"📍 用户 {user_id} 设置纬度:")
@@ -957,7 +978,7 @@ GPS偏移: {config.offset}
         help_text = """DUS 签到插件使用方法:
 
 配置命令:
-/signin set cookie <值> - 设置登录Cookie
+/signin set cookie <完整Cookie值> - 设置登录Cookie (支持包含空格和换行的Cookie)
 /signin set lat <值> - 设置纬度坐标
 /signin set lng <值> - 设置经度坐标
 /signin set class_id <值> - 设置班级ID
@@ -979,6 +1000,11 @@ GPS偏移: {config.offset}
 - 签到结果将根据每个聊天的设置进行通知
 - 在群聊中，用户将在通知中被@提及
 - 在私聊中，通知直接发送不含@提及
+
+Cookie设置说明:
+- 可以直接复制粘贴完整的Cookie，支持包含空格、换行等格式
+- 系统会自动清理多余的空白字符，保留必要的分隔符
+- 示例: /signin set cookie Hm_lvt=123; HMACCOUNT=ABC; s=xyz
 
 注意事项:
 1. Cookie/纬度/经度是必需参数

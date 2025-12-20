@@ -428,7 +428,16 @@ class DusSigninPlugin(Star):
             
             async with self.session.get(url, headers=headers) as response:
                 logger.info(f"签到任务页面响应状态: {response.status}")
-                
+
+                # 优先从最终URL中解析签到任务ID（兼容 302 重定向到 /student/punchs/course/{class_id}/{task_id} 的新逻辑）
+                final_url = str(response.url)
+                logger.info(f"签到任务最终URL: {final_url}")
+                redirect_match = re.search(r'/student/punchs/course/\d+/(\d+)', final_url)
+                if redirect_match:
+                    task_id = redirect_match.group(1)
+                    logger.info(f"通过最终URL解析到签到任务ID: {task_id}")
+                    return task_id
+
                 if response.status == 200:
                     content = await response.text()
                     logger.info(f"签到任务页面内容长度: {len(content)}")

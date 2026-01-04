@@ -455,40 +455,46 @@ class DusSigninPlugin(Star):
                         content_preview = content[:1000] if len(content) > 1000 else content
                         logger.info(f"页面内容预览: {content_preview}")
                     
-                    # 提取任务ID - 原有的正则表达式
-                    task_match = re.search(r'onclick="punch_gps\((\d+)\)"', content)
-                    if task_match:
-                        task_id = task_match.group(1)
-                        logger.info(f"成功找到签到任务ID: {task_id}")
-                        return task_id
-                    else:
-                        logger.warning("使用原有正则表达式未找到签到任务ID")
-                        
-                        # 尝试其他可能的匹配模式
-                        alternative_patterns = [
-                            r'punch_gps\((\d+)\)',  # 不限制onclick
-                            r'data-id="(\d+)".*punch',  # data-id属性
-                            r'id="(\d+)".*punch',  # id属性
-                            r'/punchs.*?(\d+)',  # URL中的数字
-                            r'task.*?(\d+)',  # task相关的数字
-                        ]
-                        
-                        for pattern in alternative_patterns:
-                            alt_match = re.search(pattern, content, re.IGNORECASE)
-                            if alt_match:
-                                task_id = alt_match.group(1)
-                                logger.info(f"使用替代模式 '{pattern}' 找到可能的任务ID: {task_id}")
-                                return task_id
-                        
-                        logger.error("所有匹配模式都未找到签到任务ID")
-                        
-                        # 如果还是找不到，记录更多有用信息
-                        if "签到" in content or "打卡" in content:
-                            logger.info("页面中包含签到或打卡相关内容，但无法提取任务ID")
-                        if "没有签到任务" in content or "无签到任务" in content:
-                            logger.warning("页面显示没有签到任务")
-                        if "已签到" in content or "签到成功" in content:
-                            logger.info("页面显示已经签到")
+                    # 提取任务ID - 使用多种模式并优先排除班级ID误判
+                    task_patterns = [
+                        r'onclick="punch_gps\((\d+)\)"',  # 旧版onclick
+                        r'punch_gps_(?:frm|form|inrange|ranges|lat|lng)_(\d+)',  # 表单与隐藏域ID
+                        r'action="/student/punch/course/\d+/(\d+)"',  # form action中的任务ID
+                        r'/student/punch/course/\d+/(\d+)',  # URL中的任务ID
+                        r'punch_gps\((\d+)\)',  # 无限制的函数调用
+                        r'id="punch_gps_form_(\d+)"',  # 备用ID
+                        r'data-id="(\d+)".*punch',  # data-id属性
+                        r'task_id[:=]"?(\d+)"?',  # 通用task字段
+                    ]
+                    
+                    candidates = []
+                    for pattern in task_patterns:
+                        matches = re.findall(pattern, content, re.IGNORECASE)
+                        for m in matches:
+                            if m not in candidates:
+                                candidates.append(m)
+                                logger.info(f"通过模式 '{pattern}' 捕获到任务ID候选: {m}")
+                    
+                    # 优先返回与班级ID不同的任务ID，避免误用班级ID
+                    for candidate in candidates:
+                        if candidate != class_id:
+                            logger.info(f"选用任务ID: {candidate}")
+                            return candidate
+                    
+                    # 如果只有班级ID被匹配到，仍返回第一个候选以保持兼容
+                    if candidates:
+                        logger.warning("仅匹配到与班级ID相同的任务ID，可能不正确")
+                        return candidates[0]
+                    
+                    logger.error("所有匹配模式都未找到签到任务ID")
+                    
+                    # 如果还是找不到，记录更多有用信息
+                    if "签到" in content or "打卡" in content:
+                        logger.info("页面中包含签到或打卡相关内容，但无法提取任务ID")
+                    if "没有签到任务" in content or "无签到任务" in content:
+                        logger.warning("页面显示没有签到任务")
+                    if "已签到" in content or "签到成功" in content:
+                        logger.info("页面显示已经签到")
                             
                 elif response.status == 403:
                     logger.error("签到任务页面访问被拒绝 (403)，Cookie可能已过期")
@@ -540,7 +546,8 @@ class DusSigninPlugin(Star):
                 'gps_addr': ''
             }
             
-            url = f"http://k8n.cn/student/punchs/course/{class_id}/{task_id}"
+            # 使用页面表单对应的 punch 接口而非 punchs，避免走错误的入口
+            url = f"http://k8n.cn/student/punch/course/{class_id}/{task_id}"
             logger.info(f"📤 请求URL: {url}")
             logger.info(f"📦 请求数据:")
             for key, value in data.items():
@@ -577,11 +584,36 @@ class DusSigninPlugin(Star):
                     elif "任务不存在" in content or "无效任务" in content:
                         logger.warning("🚫 检测到任务无效错误")
                         return {"success": False, "message": "签到任务无效或不存在"}
-                    else:
-                        logger.warning("❓ 未识别的响应内容")
-                        # 记录完整内容用于分析
-                        logger.warning(f"📄 完整响应内容: {content}")
-                        return {"success": False, "message": f"签到状态未知: {content[:100]}"}
+                    elif "考勤未开始" in content:
+                        logger.warning("⏰ 检测到考勤未开始提示")
+                        return {"success": False, "message": "考勤未开始，请留意签到时间"}
+                    
+                    # 尝试解析脚本中的 punchstatus 字段
+                    status_match = re.search(r'punchstatus":"([^"]+)"', content)
+                    if status_match:
+                        status = status_match.group(1).lower()
+                        status_map = {
+                            "unstart": "考勤未开始，请按要求时间签到",
+                            "finish": "考勤已结束",
+                            "expired": "签到已过期",
+                            "timeout": "签到已超时",
+                        }
+                        if status in status_map:
+                            logger.warning(f"📅 检测到 punchstatus={status}")
+                            return {"success": False, "message": status_map[status]}
+                    
+                    # 提取页面标题作为兜底提示
+                    title_match = re.search(r'id="title">([^<]+)<', content)
+                    if title_match:
+                        page_title = title_match.group(1).strip()
+                        if page_title:
+                            logger.warning(f"🪧 页面标题提示: {page_title}")
+                            return {"success": False, "message": page_title}
+                    
+                    logger.warning("❓ 未识别的响应内容")
+                    # 记录完整内容用于分析
+                    logger.warning(f"📄 完整响应内容: {content}")
+                    return {"success": False, "message": f"签到状态未知: {content[:100]}"}
                 else:
                     logger.error("⚠️ 签到响应内容为空")
                     return {"success": False, "message": "签到响应为空"}

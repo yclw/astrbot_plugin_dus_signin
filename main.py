@@ -456,15 +456,20 @@ class DusSigninPlugin(Star):
                         logger.info(f"页面内容预览: {content_preview}")
                     
                     # 提取任务ID - 使用多种模式并优先排除班级ID误判
+                    # 新旧页面兼容的任务ID匹配模式
                     task_patterns = [
                         r'onclick="punch_gps\((\d+)\)"',  # 旧版onclick
                         r'punch_gps_(?:frm|form|inrange|ranges|lat|lng)_(\d+)',  # 表单与隐藏域ID
                         r'action="/student/punch/course/\d+/(\d+)"',  # form action中的任务ID
+                        r'href="/student/punchs/course/\d+/(\d+)"',  # 新版卡片"去签到"按钮
                         r'/student/punch/course/\d+/(\d+)',  # URL中的任务ID
+                        r'/student/punchs/course/\d+/(\d+)',  # URL中的任务ID (punchs 兼容)
                         r'punch_gps\((\d+)\)',  # 无限制的函数调用
                         r'id="punch_gps_form_(\d+)"',  # 备用ID
                         r'data-id="(\d+)".*punch',  # data-id属性
                         r'task_id[:=]"?(\d+)"?',  # 通用task字段
+                        r'countdown"[^>]*id="countdown_(\d+)"',  # 新版倒计时节点
+                        r'class="punch-status"[^>]*>\s*<i[^>]*>\s*</i>[^<]*</div>.*?punchs/course/\d+/(\d+)',  # 新版卡片周边
                     ]
                     
                     candidates = []
